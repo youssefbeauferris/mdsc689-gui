@@ -58,6 +58,8 @@ class MainWindow(qtw.QMainWindow):
     self.imageArray = None
     self.zSlice = 100
     self.shape = None
+    self.colorWindow = 1000
+    self.colorLevel = 500
     # Initialize the window
     self.initUI()
 
@@ -161,6 +163,25 @@ class MainWindow(qtw.QMainWindow):
       keyboardTracking=False
     )
 
+    self.levelSpinBox = qtw.QSpinBox(
+      self,
+      objectName = "levelSpinBox",
+      value=self.colorLevel,
+      maximum=5000,
+      minimum=-3000,
+      singleStep=50,
+      keyboardTracking=False
+    )
+
+    self.windowSpinBox = qtw.QSpinBox(
+      self,
+      objectName = "windowSpinBox",
+      value=self.colorWindow,
+      maximum=5000,
+      minimum=-3000,
+      singleStep=50,
+      keyboardTracking=False
+    )
 
     self.lesionPushButton = qtw.QPushButton(
       "Add Lesion",
@@ -204,7 +225,7 @@ class MainWindow(qtw.QMainWindow):
 
     # Lay out the GUI ----------------------------------------------------------------------------
     self.mainGroupBox = qtw.QGroupBox("Image Controls")
-    self.mainGroupBox.setLayout(qtw.QHBoxLayout())
+    self.mainGroupBox.setLayout(qtw.QGridLayout())#QHBoxLayout())
 
     self.controlsGroupBox = qtw.QGroupBox("Thresholding controls")
     self.controlsGroupBox.setLayout(qtw.QVBoxLayout())
@@ -214,6 +235,8 @@ class MainWindow(qtw.QMainWindow):
     self.controlsFormLayout.addRow("Global Threshold",self.threshSpinBox)
     self.controlsFormLayout.addRow("Lesion Brightness",self.brightnessSpinBox)
     self.controlsFormLayout.addRow("Slice Index", self.sliceSpinBox)
+    self.controlsFormLayout.addRow("Color Level", self.levelSpinBox)
+    self.controlsFormLayout.addRow("Color Window", self.windowSpinBox)
     self.controlsGroupBox.layout().addLayout(self.controlsFormLayout)
 
     self.mainGroupBox.layout().addWidget(self.loadPushButton)
@@ -254,8 +277,10 @@ class MainWindow(qtw.QMainWindow):
     self.threshSpinBox.setMinimumSize(70,20)
     self.brightnessSpinBox.setMinimumSize(70,20)
     self.sliceSpinBox.setMinimumSize(70,20)
+    self.levelSpinBox.setMinimumSize(70,20)
+    self.windowSpinBox.setMinimumSize(70,20)
 
-    self.mainGroupBox.setMaximumSize(1000,200)
+    self.mainGroupBox.setMaximumSize(1000,1000)
 
     self.vtkWidget.setSizePolicy(
       qtw.QSizePolicy.MinimumExpanding,
@@ -274,6 +299,9 @@ class MainWindow(qtw.QMainWindow):
     self.threshSpinBox.valueChanged.connect(lambda s: self.changeThreshold(s))
     self.brightnessSpinBox.valueChanged.connect(lambda s: self.changeBrightness(s))
     self.sliceSpinBox.valueChanged.connect(lambda s: self.changeSlice(s))
+    self.windowSpinBox.valueChanged.connect(lambda s: self.changeWindow(s))
+    self.levelSpinBox.valueChanged.connect(lambda s: self.changeLevel(s))
+
     self.lesionPushButton.clicked.connect(self.addLesion)
     self.savePushButton.clicked.connect(self.saveLesion)
     self.deletePushButton.clicked.connect(self.deleteLesion)
@@ -398,34 +426,8 @@ class MainWindow(qtw.QMainWindow):
     self.contourWidget.FollowCursorOn()
     self.contourWidget.SetContinuousDraw(1)
     self.contourWidget.SetEnabled(True)
-    self.contourWidget.ProcessEventsOn()
+    #self.contourWidget.ProcessEventsOn()
     self.contourWidget.CloseLoop()
-
-
-    # Set mapper for image data
-    self.origmapper.SetInputConnection(self.resizeImage.GetOutputPort())
-    self.origmapper.SetColorWindow(500)
-    self.origmapper.SetColorLevel(100)
-    self.origmapper.SetZSlice(100)
-
-    #self.origmapper.SetSliceNumber(100)
-
-    # Set mapper for image data
-    self.mapper.SetInputConnection(self.resizeSeg.GetOutputPort())
-    self.mapper.SetColorWindow(500)
-    self.mapper.SetColorLevel(100)
-    self.mapper.SetZSlice(100)
-
-    #stenicl mapper
-
-    # Actor
-    self.origactor.SetMapper(self.origmapper)
-    self.actor.SetMapper(self.mapper)
-
-
-
-    #self.renderer.AddActor(self.origactor)
-    #self.renderer.AddActor(self.actor)
 
     self.refreshRenderWindow()
 
@@ -441,7 +443,8 @@ class MainWindow(qtw.QMainWindow):
 
   def resetContour(self):
     self.contourRep.ClearAllNodes()
-    #self.refreshRenderWindow()
+
+    self.refreshRenderWindow()
     return
 
 
@@ -477,17 +480,17 @@ class MainWindow(qtw.QMainWindow):
 
     global nodes
     state = self.contourWidget.GetWidgetState()
-    dim = self.reader.GetOutput().GetDimensions()
 
+    dim = self.reader.GetOutput().GetDimensions()
+    print(dim)
     if state == 0:
         self.statusBar().showMessage(f"Draw lesion before saving",4000)
     elif state == 2:
-
         self.polyData = self.contourRep.GetContourRepresentationAsPolyData()
         nodes = vtk_to_numpy(self.polyData.GetPoints().GetData())
-        mask = np.zeros([dim[1],dim[0]])
+        mask = np.zeros([dim[0],dim[1]])
         contour = np.rint(nodes).astype(int)
-        mask[contour[:,1], contour[:,0]] = 1
+        mask[contour[:,0], contour[:,1]] = 1
         binary  = ndimage.morphology.binary_fill_holes(mask)
         plt.figure()
         plt.imshow(binary)
@@ -512,53 +515,59 @@ class MainWindow(qtw.QMainWindow):
     return
 
   def addLesion(self):
-
-    #add lesion to current zSlice
-    self.zSlice = self.imageViewer.GetSlice()
-    lesionDataArray = self.lesion.GetPointData().GetScalars()
-    lesionArray = vtk_to_numpy(lesionDataArray).reshape(self.lesion.GetDimensions(), order='F')
-
-
-    img_slice = lesionArray[:,:,self.zSlice]
-    if self.shape.shape[0] != img_slice.shape[0]:
-        self.shape = np.transpose(self.shape)
-
-    img_slice[self.shape] = self.brightness
-
-    self.lesion.CopyStructure(self.reader.GetOutput())
-    self.lesion.GetPointData().SetScalars(numpy_to_vtk(num_array=
-                                    lesionArray.ravel(order='F'),
-                                    deep=True))
-    self.lesion_dic[self.zSlice] = self.shape
-    self.refreshRenderWindow()
-
-    if np.sum(self.thresholdArray[:,:,self.zSlice]) == 0:
-        self.statusBar().showMessage(f"cannot place lesion in segmented region",4000)
+    state = self.contourWidget.GetWidgetState()
+    if state == 0:
+        self.statusBar().showMessage(f"Draw and save lesion before adding to slice",4000)
     else:
-        pass
+        #add lesion to current zSlice
+        self.zSlice = self.imageViewer.GetSlice()
+        lesionDataArray = self.lesion.GetPointData().GetScalars()
+        lesionArray = vtk_to_numpy(lesionDataArray).reshape(self.lesion.GetDimensions(), order='F')
+
+
+        img_slice = lesionArray[:,:,self.zSlice]
+        if self.shape.shape[0] != img_slice.shape[0]:
+            self.shape = np.transpose(self.shape)
+
+        img_slice[self.shape] = self.brightness
+
+        self.lesion.CopyStructure(self.reader.GetOutput())
+        self.lesion.GetPointData().SetScalars(numpy_to_vtk(num_array=
+                                        lesionArray.ravel(order='F'),
+                                        deep=True))
+        self.lesion_dic[self.zSlice] = self.shape
+    self.refreshRenderWindow()
 
 
 
 
   def adjustBrightness(self):
 
-    zSlice = self.imageViewer.GetSlice()
-    print(zSlice)
-    if zSlice in self.lesion_dic:
+    self.zSlice = self.imageViewer.GetSlice()
+    lesionDataArray = self.lesion.GetPointData().GetScalars()
+    lesionArray = vtk_to_numpy(lesionDataArray).reshape(self.lesion.GetDimensions(), order='F')
 
-        lesionParams = self.lesion_dic[zSlice]
-        x1,x2,y1,y2 = lesionParams[-4:]
-        image_cut = lesionParams[0]
-        random_shape = lesionParams[1]
-        imageData = self.lesion
-        imageDataArray = imageData.GetPointData().GetScalars()
-        imageArray = vtk_to_numpy(imageDataArray).reshape(imageData.GetDimensions(), order='F')
-        image_cut[random_shape] = self.brightness
 
-        imageArray[x1:x2,y1:y2,zSlice] = image_cut
+    if self.zSlice in self.lesion_dic:
 
-        self.lesion.GetPointData().SetScalars(numpy_to_vtk(num_array=imageArray.ravel(order='F'),
+        self.shape = self.lesion_dic[self.zSlice]
+        #x1,x2,y1,y2 = lesionParams[-4:]
+        #image_cut = lesionParams[0]
+        #random_shape = lesionParams[1]
+        #imageData = self.lesion
+        #imageDataArray = imageData.GetPointData().GetScalars()
+        #imageArray = vtk_to_numpy(imageDataArray).reshape(imageData.GetDimensions(), order='F')
+        img_slice = lesionArray[:,:,self.zSlice]
+
+        img_slice[self.shape] = self.brightness
+
+        #imageArray[x1:x2,y1:y2,zSlice] = image_cut
+
+        self.lesion.GetPointData().SetScalars(numpy_to_vtk(num_array=lesionArray.ravel(order='F'),
                                     deep=True))
+
+    self.refreshRenderWindow()
+    return
 
   def changeSigma(self, _value):
     self.gauss.SetStandardDeviation(_value, _value, _value)
@@ -592,6 +601,17 @@ class MainWindow(qtw.QMainWindow):
     self.statusBar().showMessage(f"Changing zSlice to {_value}",4000)
     self.refreshRenderWindow()
 
+    return
+  def changeLevel(self, _value):
+    self.colorLevel = _value
+    self.imageViewer.SetColorLevel(self.colorLevel)
+    self.refreshRenderWindow()
+    return
+
+  def changeWindow(self, _value):
+    self.colorWindow = _value
+    self.imageViewer.SetColorWindow(self.colorWindow)
+    self.refreshRenderWindow()
     return
 
   def validExtension(self, extension):
