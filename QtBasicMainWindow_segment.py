@@ -15,6 +15,8 @@ import sys
 import pickle
 import numpy as np
 import vtk
+import matplotlib.pyplot as plt
+from scipy import ndimage
 
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
@@ -55,6 +57,7 @@ class MainWindow(qtw.QMainWindow):
     self.thresholdArray = None
     self.imageArray = None
     self.zSlice = 100
+    self.shape = None
     # Initialize the window
     self.initUI()
 
@@ -74,9 +77,7 @@ class MainWindow(qtw.QMainWindow):
     self.contourWidget = vtk.vtkContourWidget()
     self.placer = vtk.vtkImageActorPointPlacer()
 
-    self.stencil = vtk.vtkImageStencilToImage()
-    self.polydata = vtk.vtkPolyDataToImageStencil()
-
+    self.polyData = None
 
     self.origmapper = vtk.vtkImageMapper()#vtkImageSliceMapper()#
     self.mapper = vtk.vtkImageMapper()
@@ -156,7 +157,7 @@ class MainWindow(qtw.QMainWindow):
       value=self.zSlice,
       maximum=3000,
       minimum=-3000,
-      singleStep=5,
+      singleStep=1,
       keyboardTracking=False
     )
 
@@ -165,6 +166,27 @@ class MainWindow(qtw.QMainWindow):
       "Add Lesion",
       self,
       objectName = "lesionPushButton",
+      shortcut=qtg.QKeySequence("Ctrl+l")
+    )
+
+    self.savePushButton = qtw.QPushButton(
+      "Save Lesion",
+      self,
+      objectName = "savePushButton",
+      shortcut=qtg.QKeySequence("Ctrl+l")
+    )
+
+    self.deletePushButton = qtw.QPushButton(
+      "Delete Lesion",
+      self,
+      objectName = "deletePushButton",
+      shortcut=qtg.QKeySequence("Ctrl+l")
+    )
+
+    self.resetPushButton = qtw.QPushButton(
+      "Reset Contour",
+      self,
+      objectName = "resetPushButton",
       shortcut=qtg.QKeySequence("Ctrl+l")
     )
 
@@ -196,6 +218,9 @@ class MainWindow(qtw.QMainWindow):
 
     self.mainGroupBox.layout().addWidget(self.loadPushButton)
     self.mainGroupBox.layout().addWidget(self.lesionPushButton)
+    self.mainGroupBox.layout().addWidget(self.savePushButton)
+    self.mainGroupBox.layout().addWidget(self.deletePushButton)
+    self.mainGroupBox.layout().addWidget(self.resetPushButton)
     self.mainGroupBox.layout().addWidget(self.controlsGroupBox)
 
     # Assemble the side control panel and put it in a QPanel widget ------------------------------
@@ -207,8 +232,8 @@ class MainWindow(qtw.QMainWindow):
     # Create the VTK rendering window ------------------------------------------------------------
     self.vtkWidget = QVTKRenderWindowInteractor()
     self.vtkWidget.AddObserver("ExitEvent", lambda o, e, a=self: a.quit())
-    self.vtkWidget.AddObserver("MouseWheelForwardEvent", self.wheelForward)
-    self.vtkWidget.AddObserver("MouseWheelBackwardEvent", self.wheelBackward)
+    #self.vtkWidget.AddObserver("MouseWheelForwardEvent", self.wheelForward)
+    #self.vtkWidget.AddObserver("MouseWheelBackwardEvent", self.wheelBackward)
     #self.vtkWidget.AddObserver("KeyPressEvent", self.keyPressEvent)
 
     # Create main layout and add VTK window and control panel
@@ -250,6 +275,9 @@ class MainWindow(qtw.QMainWindow):
     self.brightnessSpinBox.valueChanged.connect(lambda s: self.changeBrightness(s))
     self.sliceSpinBox.valueChanged.connect(lambda s: self.changeSlice(s))
     self.lesionPushButton.clicked.connect(self.addLesion)
+    self.savePushButton.clicked.connect(self.saveLesion)
+    self.deletePushButton.clicked.connect(self.deleteLesion)
+    self.resetPushButton.clicked.connect(self.resetContour)
     self.initRenderWindow()
 
     # Menu actions
@@ -347,8 +375,6 @@ class MainWindow(qtw.QMainWindow):
     self.resizeSeg.SetResizeMethodToMagnificationFactors()
     self.resizeSeg.SetMagnificationFactors(self.zoom,self.zoom,0)
 
-
-
     # Resize original image
     self.resizeImage.SetInputConnection(self.gauss.GetOutputPort())
     self.resizeImage.SetResizeMethodToMagnificationFactors()
@@ -357,13 +383,10 @@ class MainWindow(qtw.QMainWindow):
     #
     self.imageViewer.SetInputConnection(self.resizeImage.GetOutputPort())
     self.imageViewer.SetRenderWindow(self.renWin)
-    #self.imageViewer.SetInteractor(self.iren)
     self.imageViewer.SetSlice(self.zSlice)
-
     self.imageViewer.Render()
-    #self.imageViewer.GetRenderer().ResetCamera()
-    #self.imageViewer.Render()
 
+    # pklace contour on plane aligned with image actor
     self.placer.SetImageActor(self.imageViewer.GetImageActor())
     self.contourRep.SetPointPlacer(self.placer)
     self.contourRep.GetProperty().SetColor(0,1,0)
@@ -376,23 +399,15 @@ class MainWindow(qtw.QMainWindow):
     self.contourWidget.SetContinuousDraw(1)
     self.contourWidget.SetEnabled(True)
     self.contourWidget.ProcessEventsOn()
+    self.contourWidget.CloseLoop()
 
-    #convert contour widget to poly data so that it can be passed to stencil
-    #creating stencil to fill in closed contour
-
-    self.polydata.SetInputData(self.contourRep.GetContourRepresentationAsPolyData())
-    #self.polydata.SetOutputOrigin(self.resizeImage.GetOrigin())
-    self.polydata.Update()
-
-    self.stencil.SetInputConnection(self.polydata.GetOutputPort())
-    self.stencil.SetInsideValue(1)
-    self.stencil.Update()
 
     # Set mapper for image data
     self.origmapper.SetInputConnection(self.resizeImage.GetOutputPort())
     self.origmapper.SetColorWindow(500)
     self.origmapper.SetColorLevel(100)
     self.origmapper.SetZSlice(100)
+
     #self.origmapper.SetSliceNumber(100)
 
     # Set mapper for image data
@@ -402,16 +417,16 @@ class MainWindow(qtw.QMainWindow):
     self.mapper.SetZSlice(100)
 
     #stenicl mapper
-    self.stencilmapper.SetInputConnection(self.stencil.GetOutputPort())
+
     # Actor
     self.origactor.SetMapper(self.origmapper)
     self.actor.SetMapper(self.mapper)
-    self.stencilactor.SetMapper(self.stencilmapper)
+
 
 
     #self.renderer.AddActor(self.origactor)
     #self.renderer.AddActor(self.actor)
-    self.renderer.AddActor(self.stencilactor)
+
     self.refreshRenderWindow()
 
     return
@@ -423,6 +438,12 @@ class MainWindow(qtw.QMainWindow):
     file.close()
     self.shape_dic = shape_dic
     return
+
+  def resetContour(self):
+    self.contourRep.ClearAllNodes()
+    #self.refreshRenderWindow()
+    return
+
 
   def convertImageData(self):
 
@@ -450,40 +471,79 @@ class MainWindow(qtw.QMainWindow):
     self.lesion.GetPointData().SetScalars(numpy_to_vtk(num_array=
                                     self.imageArray.ravel(order='F'),
                                     deep=True))
+
+
+  def saveLesion(self):
+
+    global nodes
+    state = self.contourWidget.GetWidgetState()
+    dim = self.reader.GetOutput().GetDimensions()
+
+    if state == 0:
+        self.statusBar().showMessage(f"Draw lesion before saving",4000)
+    elif state == 2:
+
+        self.polyData = self.contourRep.GetContourRepresentationAsPolyData()
+        nodes = vtk_to_numpy(self.polyData.GetPoints().GetData())
+        mask = np.zeros([dim[1],dim[0]])
+        contour = np.rint(nodes).astype(int)
+        mask[contour[:,1], contour[:,0]] = 1
+        binary  = ndimage.morphology.binary_fill_holes(mask)
+        plt.figure()
+        plt.imshow(binary)
+        plt.gca().invert_yaxis()
+        plt.show()
+        self.shape = binary
+        self.statusBar().showMessage(f"Lesion saved to dictionary",4000)
+    return
+
+  def deleteLesion(self):
+    self.zSlice = self.imageViewer.GetSlice()
+    if self.zSlice in self.lesion_dic:
+        self.threshold.Update()
+
+        lesionDataArray = self.lesion.GetPointData().GetScalars()
+        lesionArray = vtk_to_numpy(lesionDataArray).reshape(self.lesion.GetDimensions(), order='F')
+        lesionArray[:,:,self.zSlice] = self.imageArray[:,:,self.zSlice]
+        self.lesion.GetPointData().SetScalars(numpy_to_vtk(num_array=lesionArray.ravel(order='F'),
+                                    deep=True))
+    self.refreshRenderWindow()
+
+    return
+
   def addLesion(self):
 
     #add lesion to current zSlice
-    img_copy = self.imageArray.copy()
+    self.zSlice = self.imageViewer.GetSlice()
+    lesionDataArray = self.lesion.GetPointData().GetScalars()
+    lesionArray = vtk_to_numpy(lesionDataArray).reshape(self.lesion.GetDimensions(), order='F')
 
-    zSlice = self.mapper.GetZSlice()
-    print(zSlice)
 
-    if np.sum(self.thresholdArray[:,:,zSlice]) == 0:
-        self.statusBar().showMessage(f"cannot place lesion in segmented region",4000)
-    else:
-        print(1)
-        idx = np.argwhere(self.thresholdArray[:,:,zSlice]==1)
+    img_slice = lesionArray[:,:,self.zSlice]
+    if self.shape.shape[0] != img_slice.shape[0]:
+        self.shape = np.transpose(self.shape)
 
-        random_index = [np.random.randint(0,len(self.shape_dic),1),
-                        np.random.randint(0,len(idx),1)]
-        random_shape = self.shape_dic[random_index[0][0]]
-        top_right_pos = idx[random_index[1][0]]
-        x1, x2 = top_right_pos[0], top_right_pos[0] + random_shape.shape[0]
-        y1, y2 = top_right_pos[1],top_right_pos[1] + random_shape.shape[1]
-        image_cut = img_copy[x1:x2, y1:y2,zSlice]
-        image_cut[random_shape] = self.brightness
+    img_slice[self.shape] = self.brightness
 
-        self.lesion_dic[zSlice] = [image_cut, random_shape, x1, x2, y1, y2]
-        # make vtk image data structure for new image with lesion
     self.lesion.CopyStructure(self.reader.GetOutput())
     self.lesion.GetPointData().SetScalars(numpy_to_vtk(num_array=
-                                    img_copy.ravel(order='F'),
+                                    lesionArray.ravel(order='F'),
                                     deep=True))
+    self.lesion_dic[self.zSlice] = self.shape
+    self.refreshRenderWindow()
+
+    if np.sum(self.thresholdArray[:,:,self.zSlice]) == 0:
+        self.statusBar().showMessage(f"cannot place lesion in segmented region",4000)
+    else:
+        pass
+
+
 
 
   def adjustBrightness(self):
 
-    zSlice = self.mapper.GetZSlice()
+    zSlice = self.imageViewer.GetSlice()
+    print(zSlice)
     if zSlice in self.lesion_dic:
 
         lesionParams = self.lesion_dic[zSlice]
@@ -528,52 +588,11 @@ class MainWindow(qtw.QMainWindow):
   def changeSlice(self, _value):
     self.zSlice = _value
     self.imageViewer.SetSlice(self.zSlice)
+
     self.statusBar().showMessage(f"Changing zSlice to {_value}",4000)
     self.refreshRenderWindow()
 
     return
-  # Add observers for mouse wheel events to scroll through slices
-  def wheelForward(self, obj, event):
-  	zSlice = self.mapper.GetZSlice()
-
-  	if (zSlice < self.mapper.GetWholeZMax()):
-              self.mapper.SetZSlice(zSlice + 1)
-              self.origmapper.SetZSlice(zSlice + 1)
-
-  def wheelBackward(self, obj, event):
-  	zSlice = self.mapper.GetZSlice()
-  	if (zSlice > self.mapper.GetWholeZMin()):
-  	    self.mapper.SetZSlice(zSlice - 1)
-  	    self.origmapper.SetZSlice(zSlice + 1)
-
-  def keyPressEvent(self, obj, event):
-    key = obj.GetKeySym()
-    if key == 'n':
-        #self.placer.RemoveAllBoundingPlanes()
-        #self.placer.SetProjectionNormalToZAxis()
-
-        self.contourWidget.SetInteractor(self.iren)
-        self.contourWidget.SetRepresentation(self.contourRep)
-        self.contourWidget.On()
-        self.contourWidget.SetContinuousDraw(1)
-
-        #create plane which is in line with vtk slices
-
-
-        #plane1 = vtk.vtkPlane()
-        #plane1.SetOrigin(bounds[0],bounds[2],bounds[4])
-        #plane1.SetNormal(0,0,1)
-        #self.placer.AddBoundingPlane(plane1)
-
-        #plane2 = vtk.vtkPlane()
-        #plane2.SetOrigin(bounds[1],bounds[3],bounds[5])
-        #plane2.SetNormal(0,0,-1)
-        #self.placer.AddBoundingPlane(plane2)
-        #self.placer.SetImageActor(self.resizeImage.GetImageActor())
-        self.contourRep.SetPointPlacer(self.placer)
-        self.contourWidget.SetEnabled(True)
-        obj.Start()
-
 
   def validExtension(self, extension):
     if (extension == ".nii" or \
@@ -618,3 +637,20 @@ class MainWindow(qtw.QMainWindow):
     about.setInformativeText("Copyright (C) 2021\nBone Imaging Laboratory\nAll rights reserved.\nbonelab@ucalgary.ca")
     about.setStandardButtons(qtw.QMessageBox.Ok | qtw.QMessageBox.Cancel)
     about.exec_()
+    #idx = np.argwhere(self.thresholdArray[:,:,zSlice]==1)
+
+    #random_index = [np.random.randint(0,len(self.shape_dic),1),
+    #                np.random.randint(0,len(idx),1)]
+    #random_shape = self.shape_dic[random_index[0][0]]
+
+    #random_shape = self.shape
+    #print('lesion shape', random_shape.shape)
+    #top_right_pos = idx[random_index[1][0]]
+    #x1, x2 = top_right_pos[0], top_right_pos[0] + random_shape.shape[0]
+    #y1, y2 = top_right_pos[1],top_right_pos[1] + random_shape.shape[1]
+    #image_cut = img_copy[x1:x2, y1:y2,zSlice]
+    #print('image_cut', image_cut.shape)
+    #image_cut[random_shape] = self.brightness
+
+    #self.lesion_dic[zSlice] = [image_cut, random_shape, x1, x2, y1, y2]
+    # make vtk image data structure for new image with lesion

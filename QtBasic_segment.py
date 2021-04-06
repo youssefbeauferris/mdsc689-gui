@@ -50,7 +50,7 @@ $ QtBasic --window_size 1536 1024
       epilog=epilog
   )
   parser.add_argument('--input_file', help='Input file {.nii, .dcm}')
-  parser.add_argument('--gaussian', type=float, default=1.2, metavar='GAUSS', help='Gaussian standard deviation (default: %(default)s)')
+  parser.add_argument('--gaussian', type=float, default=0.1, metavar='GAUSS', help='Gaussian standard deviation (default: %(default)s)')
   parser.add_argument('--radius', type=int, default=2, metavar='RADIUS', help='Gaussian radius support (default: %(default)s)')
   parser.add_argument('--brightness', type=int, default=0, metavar='BRIGHT', help='brightness of lesions (default: %(default)s)')
   parser.add_argument('--thresh', type=int, default=100, metavar='TH', help='Global Threshold (default: %(default)s)')
