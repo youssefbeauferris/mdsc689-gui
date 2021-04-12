@@ -42,7 +42,7 @@ class MainWindow(qtw.QMainWindow):
 
     # Window setup
     self.resize(window_size[0],window_size[1])
-    self.title = "Basic Qt Viewer for MDSC 689.03"
+    self.title = "Qt Viewer for Lesion Augmentation"
 
     self.statusBar().showMessage("Welcome.",8000)
 
@@ -58,6 +58,7 @@ class MainWindow(qtw.QMainWindow):
     self.imageArray = None
     self.zSlice = 100
     self.shape = None
+    self.crop = None
     self.colorWindow = 1000
     self.colorLevel = 500
     # Initialize the window
@@ -211,7 +212,26 @@ class MainWindow(qtw.QMainWindow):
       shortcut=qtg.QKeySequence("Ctrl+l")
     )
 
+    self.saveCropPushButton = qtw.QPushButton(
+      "Save Cropped Region",
+      self,
+      objectName = "saveCropPushButton",
+      shortcut=qtg.QKeySequence("Ctrl+l")
+    )
 
+    self.confirmCropPushButton = qtw.QPushButton(
+      "Confirm Position of Cropped Contour",
+      self,
+      objectName = "confirmCropPushButton",
+      shortcut=qtg.QKeySequence("Ctrl+l")
+    )
+
+    self.addCropPushButton = qtw.QPushButton(
+      "Add Cropped Pixels to Current Slice",
+      self,
+      objectName = "addCropPushButton",
+      shortcut=qtg.QKeySequence("Ctrl+l")
+    )
     # Create the menu options --------------------------------------------------------------------
     menubar = qtw.QMenuBar()
     self.setMenuBar(menubar)
@@ -245,6 +265,11 @@ class MainWindow(qtw.QMainWindow):
     self.mainGroupBox.layout().addWidget(self.deletePushButton)
     self.mainGroupBox.layout().addWidget(self.resetPushButton)
     self.mainGroupBox.layout().addWidget(self.controlsGroupBox)
+
+    self.mainGroupBox.layout().addWidget(self.saveCropPushButton)
+    self.mainGroupBox.layout().addWidget(self.confirmCropPushButton)
+    self.mainGroupBox.layout().addWidget(self.addCropPushButton)
+
 
     # Assemble the side control panel and put it in a QPanel widget ------------------------------
     self.panel = qtw.QVBoxLayout()
@@ -306,6 +331,10 @@ class MainWindow(qtw.QMainWindow):
     self.savePushButton.clicked.connect(self.saveLesion)
     self.deletePushButton.clicked.connect(self.deleteLesion)
     self.resetPushButton.clicked.connect(self.resetContour)
+
+    self.saveCropPushButton.clicked.connect(self.saveCrop)
+    self.confirmCropPushButton.clicked.connect(self.confirmCrop)
+    self.addCropPushButton.clicked.connect(self.addCrop)
     self.initRenderWindow()
 
     # Menu actions
@@ -377,7 +406,7 @@ class MainWindow(qtw.QMainWindow):
     self.threshold.SetOutValue(0)
     self.threshold.Update()
 
-    self.read_dictionary()
+    #self.read_dictionary()
     self.convertImageData()
     self.convertThresholdData()
     self.initializeLesion()
@@ -442,8 +471,9 @@ class MainWindow(qtw.QMainWindow):
     return
 
   def resetContour(self):
-    self.contourRep.ClearAllNodes()
-
+    #self.contourRep.ClearAllNodes()
+    #self.contourWidget.ResetAction()
+    self.contourWidget.Initialize()
     self.refreshRenderWindow()
     return
 
@@ -474,6 +504,80 @@ class MainWindow(qtw.QMainWindow):
     self.lesion.GetPointData().SetScalars(numpy_to_vtk(num_array=
                                     self.imageArray.ravel(order='F'),
                                     deep=True))
+
+  def saveCrop(self):
+    global nodes
+    state = self.contourWidget.GetWidgetState()
+    dim = self.reader.GetOutput().GetDimensions()
+    self.zSlice = self.imageViewer.GetSlice()
+    if state == 0:
+        self.statusBar().showMessage(f"Draw lesion before saving",4000)
+    elif state == 2:
+        self.polyData = self.contourRep.GetContourRepresentationAsPolyData()
+        nodes = vtk_to_numpy(self.polyData.GetPoints().GetData())
+        mask = np.zeros([dim[0],dim[1]])
+        contour = np.ceil(nodes).astype(int)
+        mask[contour[:,0], contour[:,1]] = 1
+        binary  = ndimage.morphology.binary_fill_holes(mask)
+        self.shape = binary
+        plt.figure()
+        plt.imshow(binary)
+        plt.gca().invert_yaxis()
+        plt.show()
+
+        crop = self.imageArray[:,:,self.zSlice][binary]
+        self.crop = crop
+    return
+
+  def confirmCrop(self):
+    global nodes
+    state = self.contourWidget.GetWidgetState()
+    dim = self.reader.GetOutput().GetDimensions()
+    if state == 0:
+        self.statusBar().showMessage(f"Draw lesion before saving",4000)
+    elif state == 2:
+        self.polyData = self.contourRep.GetContourRepresentationAsPolyData()
+        nodes = vtk_to_numpy(self.polyData.GetPoints().GetData())
+        mask = np.zeros([dim[0],dim[1]])
+        contour = np.ceil(nodes).astype(int)
+        mask[contour[:,0], contour[:,1]] = 1
+        binary  = ndimage.morphology.binary_fill_holes(mask)
+        self.shape = binary
+        plt.figure()
+        plt.imshow(binary)
+        plt.gca().invert_yaxis()
+        plt.show()
+
+  def addCrop(self):
+    state = self.contourWidget.GetWidgetState()
+    if state == 0:
+        self.statusBar().showMessage(f"Draw and save lesion before adding to slice",4000)
+    else:
+        #add lesion to current zSlice
+        self.zSlice = self.imageViewer.GetSlice()
+        lesionDataArray = self.lesion.GetPointData().GetScalars()
+        lesionArray = vtk_to_numpy(lesionDataArray).reshape(self.lesion.GetDimensions(), order='F')
+
+
+        img_slice = lesionArray[:,:,self.zSlice]
+        if self.shape.shape[0] != img_slice.shape[0]:
+            self.shape = np.transpose(self.shape)
+
+        idx = min([img_slice[self.shape].shape, self.crop.shape])[0]
+        #normalize cropped value
+        MAX = img_slice.max()
+        MIN = img_slice.min()
+        #img_slice[self.shape][:idx] = self.crop[:idx]
+        if img_slice[self.shape].shape < self.crop.shape:
+            img_slice[self.shape]= self.crop[:idx]#* (MAX - MIN) / MAX
+        else:
+            img_slice[self.shape][:idx] = self.crop
+        self.lesion.CopyStructure(self.reader.GetOutput())
+        self.lesion.GetPointData().SetScalars(numpy_to_vtk(num_array=
+                                        lesionArray.ravel(order='F'),
+                                        deep=True))
+        #self.lesion_dic[self.zSlice] = self.shape
+    self.refreshRenderWindow()
 
 
   def saveLesion(self):
@@ -514,7 +618,34 @@ class MainWindow(qtw.QMainWindow):
 
     return
 
+
   def addLesion(self):
+    state = self.contourWidget.GetWidgetState()
+    if state == 0:
+        self.statusBar().showMessage(f"Draw and save lesion before adding to slice",4000)
+    else:
+        #add lesion to current zSlice
+        self.zSlice = self.imageViewer.GetSlice()
+        lesionDataArray = self.lesion.GetPointData().GetScalars()
+        lesionArray = vtk_to_numpy(lesionDataArray).reshape(self.lesion.GetDimensions(), order='F')
+
+
+        img_slice = lesionArray[:,:,self.zSlice]
+        if self.shape.shape[0] != img_slice.shape[0]:
+            self.shape = np.transpose(self.shape)
+
+        img_slice[self.shape] = self.brightness
+
+        self.lesion.CopyStructure(self.reader.GetOutput())
+        self.lesion.GetPointData().SetScalars(numpy_to_vtk(num_array=
+                                        lesionArray.ravel(order='F'),
+                                        deep=True))
+        self.lesion_dic[self.zSlice] = self.shape
+    self.refreshRenderWindow()
+
+
+
+  def addLesion1(self):
     state = self.contourWidget.GetWidgetState()
     if state == 0:
         self.statusBar().showMessage(f"Draw and save lesion before adding to slice",4000)
