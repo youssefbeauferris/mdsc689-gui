@@ -5,9 +5,10 @@
 #---------------------------------------------------------------
 # Created February 2, 2021
 # Steven Boyd
+# Modified by Youssef Beauferris
+# April 2021
 #---------------------------------------------------------------
-# A Qt GUI-based tool demonstrating the basics of integrating
-# pyqt, vtk and python.
+# A Qt GUI-based tool for augmenting synthetic white matter lesions
 #
 # Note: Uses PyQt5, vtk8.2 and python3:
 #     pyqt        5.12.3           py38hf180056_3    conda-forge
@@ -15,7 +16,7 @@
 #     python      3.8.1                h5c2c468_1    conda-forge
 #
 # Create an environment like this:
-# conda create --name bonelab --channel conda-forge python=3.8 pyqt=5.12 vtk=8
+# conda create --name bonelab --channel conda-forge python=3.8 pyqt=5.12 vtk=8 scipy numpy matplotlib pickle
 #
 # Usage:
 #   QtBasic -h
