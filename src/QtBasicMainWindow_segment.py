@@ -36,6 +36,8 @@ class MainWindow(qtw.QMainWindow):
                zSlice,
                brightness,
                window_size,
+               colorWindow,
+               colorLevel,
                *args, **kwargs):
     """MainWindow constructor"""
     super().__init__(*args, **kwargs)
@@ -59,8 +61,8 @@ class MainWindow(qtw.QMainWindow):
     self.zSlice = 100
     self.shape = None
     self.crop = None
-    self.colorWindow = 1000
-    self.colorLevel = 500
+    self.colorWindow = colorWindow
+    self.colorLevel = colorLevel
     # Initialize the window
     self.initUI()
 
@@ -70,7 +72,7 @@ class MainWindow(qtw.QMainWindow):
     self.lesion = vtk.vtkImageData()
     self.threshold = vtk.vtkImageThreshold()
     self.mapToColors = vtk.vtkImageMapToColors()
-
+    self.coordinate = vtk.vtkCoordinate()
     self.imageViewer = vtk.vtkImageViewer2()
 
     self.resizeImage = vtk.vtkImageResize()
@@ -102,6 +104,8 @@ class MainWindow(qtw.QMainWindow):
       self.changeThreshold(thresh)
       self.changeBrightness(brightness)
       self.changeSlice(zSlice)
+      self.changeLevel(5000)
+      self.changeWindow(5000)
 
   def initUI(self):
     ########################################
@@ -167,7 +171,7 @@ class MainWindow(qtw.QMainWindow):
     self.levelSpinBox = qtw.QSpinBox(
       self,
       objectName = "levelSpinBox",
-      value=self.colorLevel,
+      value=5000,
       maximum=5000,
       minimum=-3000,
       singleStep=50,
@@ -361,7 +365,7 @@ class MainWindow(qtw.QMainWindow):
     # Create renderer
     self.renderer = vtk.vtkRenderer()
     self.renderer.SetBackground((.2, .2, .2)) # grey
-
+    #self.renderer.WorldToView()
     # Create interactor
     self.renWin = self.vtkWidget.GetRenderWindow()
     self.renWin.AddRenderer(self.renderer)
@@ -446,9 +450,14 @@ class MainWindow(qtw.QMainWindow):
 
     # pklace contour on plane aligned with image actor
     self.placer.SetImageActor(self.imageViewer.GetImageActor())
+    #self.placer.SetBounds(-256,256,-256,256,0,0)
+    #self.contourRep.SetPixelTolerance(1)
     self.contourRep.SetPointPlacer(self.placer)
     self.contourRep.GetProperty().SetColor(0,1,0)
     self.contourRep.GetLinesProperty().SetColor(0,1,0)
+
+
+
 
     #contour widget
     self.contourWidget.SetRepresentation(self.contourRep)
@@ -461,14 +470,6 @@ class MainWindow(qtw.QMainWindow):
 
     self.refreshRenderWindow()
 
-    return
-
-  def read_dictionary(self):
-    # read predefined dictionary of shapes for
-    file = open('../Image_Datasets/shape_dic.pkl', 'rb')
-    shape_dic = pickle.load(file)
-    file.close()
-    self.shape_dic = shape_dic
     return
 
   def resetContour(self):
@@ -582,32 +583,35 @@ class MainWindow(qtw.QMainWindow):
 
 
   def saveLesion(self):
+    #camera = self.renderer.GetActiveCamera()
+    #windowHeight = self.renderer.GetRenderWindow().GetViews()[0].getSize()[1]
+    #worldHeight = 2*camera.getParallelScale()
+    #if windowHeight > 0:
+#         scale = worlHeight / windowHeight
 
     global nodes
+
+
     state = self.contourWidget.GetWidgetState()
 
     dim = self.reader.GetOutput().GetDimensions()
-    print(dim)
+
     if state == 0:
         self.statusBar().showMessage(f"Draw lesion before saving",4000)
     elif state == 2:
-        print(dim)
+
         #self.contourRep.SetWorldTolerance(0.00001)
         self.polyData = self.contourRep.GetContourRepresentationAsPolyData()
-        print(self.contourRep.GetWorldTolerance())
-        
-        nodes = vtk_to_numpy(self.polyData.GetPoints().GetData())
+        nodes = 2.15 * vtk_to_numpy(self.polyData.GetPoints().GetData())
 
-        #print(nodes)
+
         mask = np.zeros([dim[0],dim[1]])
         contour = np.floor(nodes).astype(int)
         mask[contour[:,0], contour[:,1]] = 1
-        binary  = ndimage.morphology.binary_fill_holes(mask)
-        print(contour)
-        
+        binary = ndimage.morphology.binary_fill_holes(mask)
+
         plt.figure()
         plt.imshow(binary)
-        plt.gca().invert_yaxis()
         plt.show()
         self.shape = binary
         self.statusBar().showMessage(f"Lesion saved to dictionary",4000)
@@ -638,13 +642,15 @@ class MainWindow(qtw.QMainWindow):
         lesionDataArray = self.lesion.GetPointData().GetScalars()
         lesionArray = vtk_to_numpy(lesionDataArray).reshape(self.lesion.GetDimensions(), order='F')
 
-
         img_slice = lesionArray[:,:,self.zSlice]
-        if self.shape.shape[0] != img_slice.shape[0]:
-            self.shape = np.transpose(self.shape)
+        #if self.shape.shape[0] != img_slice.shape[0]:
+    #        self.shape = np.transpose(self.shape)
 
         img_slice[self.shape] = self.brightness
-
+        print(self.brightness)
+        plt.figure()
+        plt.imshow(img_slice, cmap='gray')
+        plt.show()
         self.lesion.CopyStructure(self.reader.GetOutput())
         self.lesion.GetPointData().SetScalars(numpy_to_vtk(num_array=
                                         lesionArray.ravel(order='F'),

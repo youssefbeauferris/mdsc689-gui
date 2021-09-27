@@ -56,7 +56,9 @@ $ QtBasic --window_size 1536 1024
   parser.add_argument('--brightness', type=int, default=0, metavar='BRIGHT', help='brightness of lesions (default: %(default)s)')
   parser.add_argument('--thresh', type=int, default=100, metavar='TH', help='Global Threshold (default: %(default)s)')
   parser.add_argument('--zSlice', type=int, default=100, metavar='zS', help='zSlice (default: %(default)s)')
-  parser.add_argument('--zoom', type=int, default=3, metavar='Z', help='Zoom magnification factor (default: %(default)s)')
+  parser.add_argument('--zoom', type=int, default=0, metavar='Z', help='Zoom magnification factor (default: %(default)s)')
+  parser.add_argument('--colorWindow', type=int, default=2500, metavar='cW', help='color window (default: %(default)s)')
+  parser.add_argument('--colorLevel', type=int, default=5000, metavar='cW', help='color level (default: %(default)s)')
 
   parser.add_argument('--window_size', default=[1536,1024], nargs=2, type=int, metavar='DIM',
                       help='Specify minimum main window size (default: %(default)s)')
